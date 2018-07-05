@@ -1,0 +1,132 @@
+apt-get install strongswan libcharon-extra-plugins strongswan-pki insserv
+
+cd /etc/ipsec.d/
+
+ipsec pki --gen --type rsa --size 4096 --outform pem > private/strongswan-key.pem
+
+chmod 600 private/strongswan-key.pem
+
+ipsec pki --self --ca \
+--lifetime 3650 \
+--in private/strongswan-key.pem \
+--type rsa \
+--dn "C=US, O=$organization, CN=$organization Root CA" \
+--outform pem > cacerts/strongswan-certificate.pem
+
+ipsec pki --gen --type rsa --size 2048 --outform pem > private/vpn-host-key.pem
+
+chmod 600 private/vpn-host-key.pem
+
+ipsec pki --pub --in private/vpn-host-key.pem --type rsa | \
+ipsec pki --issue --lifetime 730 \
+--cacert cacerts/strongswan-certificate.pem \
+--cakey private/strongswan-key.pem \
+--dn "C=US, O=$organization, CN=$domainaddress" \
+--san "$domainaddress" \
+--flag serverAuth --flag ikeIntermediate \
+--outform pem > certs/vpn-host-certificate.pem
+
+ipsec pki --gen --type rsa --size 2048 --outform pem > private/$organization-key.pem
+
+chmod 600 private/$organization-key.pem
+
+ipsec pki --pub --in private/jkgtw-key.pem --type rsa | \
+ipsec pki --issue --lifetime 730 \
+--cacert cacerts/strongswan-certificate.pem \
+--cakey private/strongswan-key.pem \
+--dn "C=US, O=$organization, CN=$user" \
+--san "$user" \
+--outform pem > certs/$organization-certificate.pem
+
+openssl pkcs12 -export -inkey private/$organization-key.pem \
+-in certs/$organization-certificate.pem \
+-name "$organization VPN Certificate" \
+-certfile cacerts/strongswan-certificate.pem \
+-caname "$organization Root CA" \
+-out certs/$organization.p12
+
+cp /etc/ipsec.d/cacerts/strongswan-certificate.pem /home/pi
+cp /etc/ipsec.d/certs/$organization.p12 /home/pi
+
+nano /etc/ipsec.conf
+
+# ipsec.conf - strongSwan IPsec configuration file
+
+config setup
+charondebug="cfg 2, dmn 2, ike 2, net 2"
+uniqueids=never
+
+conn %default
+    compress=yes
+    dpdaction=restart
+    dpddelay=30s
+    inactivity=300s
+    fragmentation=yes
+    forceencaps=yes
+    rekey=no
+    keyexchange=ikev2
+
+    leftauth=pubkey
+    left=%any
+    leftid=@$domainaddress
+    leftcert=vpn-host-certificate.pem
+    leftsendcert=always
+    leftsubnet=0.0.0.0/0
+
+    right=%any
+    rightid=$user
+    rightcert=jkgtw-certificate.pem
+    rightsourceip=10.10.10.0/24
+    rightdns=1.1.1.1,8.8.8.8
+    ike=aes256-sha1-modp1024,aes128-sha1-modp1024,aes256-sha256-modp1024,3des-sha1-modp1024!
+    esp=aes256-sha256,aes256-sha1,3des-sha1!
+
+conn iOS
+    auto=add
+
+conn OSX-EAP-TLS
+    rightauth=eap-tls
+    rightcert2=jkgtw-certificate.pem
+    auto=add
+
+include /var/lib/strongswan/ipsec.conf.inc
+
+nano /etc/ipsec.secrets
+
+: RSA vpn-host-key.pem
+
+ipsec rereadsecrets
+
+nano /etc/sysctl.conf
+
+(remove #)
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+
+to verify 
+sysctl -p12
+
+reboot
+sudo -s
+
+iptables -t nat -A POSTROUTING -o eth0 ! -p esp -j SNAT --to-source $localip
+iptables -A INPUT -p udp --dport 500 -j ACCEPT
+iptables -A INPUT -p udp --dport 4500 -j ACCEPT
+iptables -A INPUT -p esp -j ACCEPT
+iptables -t nat -I POSTROUTING -s 10.10.10.0/24 -o eth0 -m policy --dir out --pol ipsec -j ACCEPT
+iptables -t nat -A POSTROUTING -s 10.10.10.0/24 -o eth0 -j MASQUERADE
+iptables -A FORWARD -s 10.0.0.0/24 -j ACCEPT
+
+iptables-save > /etc/iptables.conf
+
+apt-get install iptables-persistent
+
+nano /ect/init.d/ipsec
+(add $syslog)
+# Provides: ipsec
+# Required-Start: $network $remote_fs $syslog
+# Required-Stop: $network $remote_fs $syslog
+
+insserv -r ipsec
+insser ipsec
