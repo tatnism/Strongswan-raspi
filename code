@@ -131,4 +131,4 @@ nano /ect/init.d/ipsec
 # Required-Stop: $network $remote_fs $syslog
 
 insserv -r ipsec
-insser ipsec
+insserv ipsec
