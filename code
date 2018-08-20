@@ -1,3 +1,5 @@
+Change the following value: $organization, $domainaddress, $user
+
 apt-get install strongswan libcharon-extra-plugins strongswan-pki insserv
 
 cd /etc/ipsec.d/
@@ -30,7 +32,7 @@ ipsec pki --gen --type rsa --size 2048 --outform pem > private/$organization-key
 
 chmod 600 private/$organization-key.pem
 
-ipsec pki --pub --in private/jkgtw-key.pem --type rsa | \
+ipsec pki --pub --in private/$organization-key.pem --type rsa | \
 ipsec pki --issue --lifetime 730 \
 --cacert cacerts/strongswan-certificate.pem \
 --cakey private/strongswan-key.pem \
@@ -75,7 +77,7 @@ conn %default
 
     right=%any
     rightid=$user
-    rightcert=jkgtw-certificate.pem
+    rightcert=$organization-certificate.pem
     rightsourceip=10.10.10.0/24
     rightdns=1.1.1.1,8.8.8.8
     ike=aes256-sha1-modp1024,aes128-sha1-modp1024,aes256-sha256-modp1024,3des-sha1-modp1024!
@@ -86,7 +88,7 @@ conn iOS
 
 conn OSX-EAP-TLS
     rightauth=eap-tls
-    rightcert2=jkgtw-certificate.pem
+    rightcert2=$organization-certificate.pem
     auto=add
 
 include /var/lib/strongswan/ipsec.conf.inc
